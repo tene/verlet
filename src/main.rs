@@ -1,12 +1,10 @@
 use piston_window::*;
 
 use specs::{
-    Builder, Component, DispatcherBuilder, Entities, Join, Read, ReadStorage, System, VecStorage,
-    World, WriteStorage,
+    Builder, Component, Dispatcher, DispatcherBuilder, Entities, Join, Read, ReadExpect,
+    ReadStorage, System, VecStorage, World, WriteStorage,
 };
 use specs_derive::*;
-
-use std::time::Duration;
 
 #[derive(Component, Debug)]
 #[storage(VecStorage)]
@@ -33,18 +31,25 @@ struct Acceleration {
     y: f64,
 }
 
+struct TimeStep(f64);
+struct PrevTimeStep(f64);
+
+#[derive(Clone, Copy)]
+struct Cursor(f64, f64);
+
 struct Verlet;
 
 impl<'a> System<'a> for Verlet {
     type SystemData = (
-        Read<'a, Duration>,
+        ReadExpect<'a, TimeStep>,
+        ReadExpect<'a, PrevTimeStep>,
         ReadStorage<'a, Acceleration>,
         ReadStorage<'a, Mass>,
         WriteStorage<'a, Position>,
         WriteStorage<'a, PrevPosition>,
     );
 
-    fn run(&mut self, (time, force, mass, mut pos, mut prevpos): Self::SystemData) {
+    fn run(&mut self, (time, prevtime, force, mass, mut pos, mut prevpos): Self::SystemData) {
         /*
         for (force, mass, pos, prevpos) in (&force, &mass, &mut pos, &mut prevpos).join() {
             unimplemented!()
@@ -58,24 +63,30 @@ struct Gravity;
 impl<'a> System<'a> for Gravity {
     type SystemData = (
         Entities<'a>,
+        Read<'a, Option<Cursor>>,
         ReadStorage<'a, Position>,
         WriteStorage<'a, Acceleration>,
     );
 
-    fn run(&mut self, (entities, pos, mut force): Self::SystemData) {
+    fn run(&mut self, (entities, cursor, pos, mut force): Self::SystemData) {
         /*unimplemented!()*/
     }
 }
 
-fn build_world() -> World {
+fn add_particle(world: &mut World, x: f64, y: f64, mass: f64) {
+    world
+        .create_entity()
+        .with(Position { x, y })
+        .with(PrevPosition { x, y })
+        .with(Mass(mass))
+        .build();
+    world.maintain();
+}
+
+fn build_world<'a, 'b>() -> (World, Dispatcher<'a, 'b>) {
     let mut world = World::new();
 
-    /*world.add_resource(Duration::from_secs(0));
-
-    world.register::<Position>();
-    world.register::<PrevPosition>();
-    world.register::<Mass>();
-    world.register::<Force>();*/
+    world.add_resource(PrevTimeStep(0.1));
 
     let mut dispatcher = DispatcherBuilder::new()
         .with(Verlet, "verlet", &[])
@@ -84,16 +95,30 @@ fn build_world() -> World {
 
     dispatcher.setup(&mut world.res);
 
-    world
-        .create_entity()
-        .with(Position { x: 51.0, y: 51.0 })
-        .with(PrevPosition { x: 50.9, y: 50.9 })
-        .with(Mass(10.0))
-        .build();
+    add_particle(&mut world, 50.0, 50.0, 10.0);
 
-    dispatcher.dispatch(&mut world.res);
-    world.maintain();
-    world
+    (world, dispatcher)
+}
+
+fn handle_input(world: &mut World, input: Input) {
+    match input {
+        Input::Button(args) => match (args.state, args.button, args.scancode) {
+            (ButtonState::Press, Button::Mouse(MouseButton::Left), None) => {
+                let cursor = *world.read_resource::<Option<Cursor>>();
+                if let Some(Cursor(x, y)) = cursor {
+                    add_particle(world, x, y, 5.0);
+                }
+            }
+            _ => {}
+        },
+        Input::Move(Motion::MouseCursor(x, y)) => {
+            *world.write_resource::<Option<Cursor>>() = Some(Cursor(x, y));
+        }
+        Input::Cursor(false) => {
+            *world.write_resource::<Option<Cursor>>() = None;
+        }
+        _ => {}
+    }
 }
 
 fn main() {
@@ -101,10 +126,10 @@ fn main() {
         .build()
         .unwrap();
 
-    let mut world = build_world();
+    let (mut world, mut dispatcher) = build_world();
     while let Some(e) = window.next() {
         match e {
-            Event::Input(_input) => {}
+            Event::Input(input) => handle_input(&mut world, input),
             Event::Loop(Loop::Render(_args)) => {
                 window.draw_2d(&e, |c, g| {
                     clear([0.5, 0.5, 0.5, 1.0], g);
@@ -120,8 +145,9 @@ fn main() {
                     }
                 });
             }
-            Event::Loop(Loop::Update(UpdateArgs { dt: _dt })) => {
-                world.maintain();
+            Event::Loop(Loop::Update(UpdateArgs { dt })) => {
+                world.add_resource(TimeStep(dt));
+                dispatcher.dispatch(&mut world.res);
             }
             Event::Loop(Loop::AfterRender(_)) => {}
             Event::Loop(Loop::Idle(IdleArgs { dt: _dt })) => {}
