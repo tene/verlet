@@ -2,29 +2,29 @@ use piston_window::*;
 
 use specs::{
     Builder, Component, Dispatcher, DispatcherBuilder, Entities, Join, Read, ReadExpect,
-    ReadStorage, System, VecStorage, World, WriteStorage,
+    ReadStorage, System, VecStorage, World, WriteExpect, WriteStorage,
 };
 use specs_derive::*;
 
-#[derive(Component, Debug)]
+#[derive(Clone, Copy, Component, Debug)]
 #[storage(VecStorage)]
 struct Position {
     x: f64,
     y: f64,
 }
 
-#[derive(Component, Debug)]
+#[derive(Clone, Copy, Component, Debug)]
 #[storage(VecStorage)]
 struct PrevPosition {
     x: f64,
     y: f64,
 }
 
-#[derive(Component, Debug)]
+#[derive(Clone, Copy, Component, Debug)]
 #[storage(VecStorage)]
 struct Mass(f64);
 
-#[derive(Component, Debug)]
+#[derive(Clone, Copy, Component, Debug)]
 #[storage(VecStorage)]
 struct Acceleration {
     x: f64,
@@ -42,19 +42,30 @@ struct Verlet;
 impl<'a> System<'a> for Verlet {
     type SystemData = (
         ReadExpect<'a, TimeStep>,
-        ReadExpect<'a, PrevTimeStep>,
-        ReadStorage<'a, Acceleration>,
-        ReadStorage<'a, Mass>,
+        WriteExpect<'a, PrevTimeStep>,
+        WriteStorage<'a, Acceleration>,
         WriteStorage<'a, Position>,
         WriteStorage<'a, PrevPosition>,
     );
 
-    fn run(&mut self, (time, prevtime, force, mass, mut pos, mut prevpos): Self::SystemData) {
-        /*
-        for (force, mass, pos, prevpos) in (&force, &mass, &mut pos, &mut prevpos).join() {
-            unimplemented!()
+    fn run(
+        &mut self,
+        (time, mut prevtime, mut acceleration, mut pos, mut prevpos): Self::SystemData,
+    ) {
+        let timescale = time.0 / prevtime.0;
+        let timesq = time.0 * time.0;
+
+        for (accel, pos, prevpos) in (&mut acceleration, &mut pos, &mut prevpos).join() {
+            let Position { x, y } = *pos;
+            let PrevPosition { x: px, y: py } = *prevpos;
+            let Acceleration { x: ax, y: ay } = *accel;
+            let nx = x + (x - px) * timescale + ax * timesq;
+            let ny = y + (y - py) * timescale + ay * timesq;
+            *prevpos = PrevPosition { x, y };
+            *pos = Position { x: nx, y: ny };
+            *accel = Acceleration { x: 0.0, y: 0.0 };
         }
-        unimplemented!()*/
+        *prevtime = PrevTimeStep(time.0);
     }
 }
 
@@ -65,10 +76,11 @@ impl<'a> System<'a> for Gravity {
         Entities<'a>,
         Read<'a, Option<Cursor>>,
         ReadStorage<'a, Position>,
+        ReadStorage<'a, Mass>,
         WriteStorage<'a, Acceleration>,
     );
 
-    fn run(&mut self, (entities, cursor, pos, mut force): Self::SystemData) {
+    fn run(&mut self, (entities, cursor, pos, mass, mut acceleration): Self::SystemData) {
         /*unimplemented!()*/
     }
 }
@@ -77,8 +89,12 @@ fn add_particle(world: &mut World, x: f64, y: f64, mass: f64) {
     world
         .create_entity()
         .with(Position { x, y })
-        .with(PrevPosition { x, y })
+        .with(PrevPosition {
+            x: x - 0.1,
+            y: y - 0.1,
+        })
         .with(Mass(mass))
+        .with(Acceleration { x: 0.0, y: 0.0 })
         .build();
     world.maintain();
 }
