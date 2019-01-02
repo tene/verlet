@@ -6,6 +6,8 @@ use specs::{
 };
 use specs_derive::*;
 
+use rand::Rng;
+
 #[derive(Clone, Copy, Component, Debug)]
 #[storage(VecStorage)]
 struct Position {
@@ -71,6 +73,8 @@ impl<'a> System<'a> for Verlet {
 
 struct Gravity;
 
+static G: f64 = 100.0;
+
 impl<'a> System<'a> for Gravity {
     type SystemData = (
         Entities<'a>,
@@ -80,8 +84,26 @@ impl<'a> System<'a> for Gravity {
         WriteStorage<'a, Acceleration>,
     );
 
-    fn run(&mut self, (entities, cursor, pos, mass, mut acceleration): Self::SystemData) {
-        /*unimplemented!()*/
+    fn run(&mut self, (entities, cursor, positions, masses, mut accelerations): Self::SystemData) {
+        for (myid, mypos, mymass, mut myaccel) in
+            (&entities, &positions, &masses, &mut accelerations).join()
+        {
+            for (iid, ipos, imass) in (&entities, &positions, &masses).join() {
+                if myid == iid {
+                    continue;
+                }
+                let dx = ipos.x - mypos.x;
+                let dy = ipos.y - mypos.y;
+                let mut distance = (dx * dx + dy * dy).sqrt();
+                // XXX TODO collisions
+                if distance < 3.0 {
+                    distance = 3.0
+                }
+                let accel = G * mymass.0 * imass.0 / (distance * distance * distance);
+                myaccel.x += dx * accel;
+                myaccel.y += dy * accel;
+            }
+        }
     }
 }
 
@@ -89,10 +111,7 @@ fn add_particle(world: &mut World, x: f64, y: f64, mass: f64) {
     world
         .create_entity()
         .with(Position { x, y })
-        .with(PrevPosition {
-            x: x - 0.1,
-            y: y - 0.1,
-        })
+        .with(PrevPosition { x, y })
         .with(Mass(mass))
         .with(Acceleration { x: 0.0, y: 0.0 })
         .build();
@@ -122,7 +141,7 @@ fn handle_input(world: &mut World, input: Input) {
             (ButtonState::Press, Button::Mouse(MouseButton::Left), None) => {
                 let cursor = *world.read_resource::<Option<Cursor>>();
                 if let Some(Cursor(x, y)) = cursor {
-                    add_particle(world, x, y, 5.0);
+                    add_particle(world, x, y, rand::thread_rng().gen_range(5.0, 50.0));
                 }
             }
             _ => {}
@@ -154,7 +173,7 @@ fn main() {
                     for (pos, mass) in (&positions, &masses).join() {
                         ellipse(
                             [0.6, 0.5, 1.0, 1.0],
-                            ellipse::circle(pos.x, pos.y, mass.0),
+                            ellipse::circle(pos.x, pos.y, mass.0.sqrt()),
                             c.transform,
                             g,
                         );
