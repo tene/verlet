@@ -85,9 +85,7 @@ impl<'a> System<'a> for Gravity {
     );
 
     fn run(&mut self, (entities, cursor, positions, masses, mut accelerations): Self::SystemData) {
-        for (myid, mypos, mymass, mut myaccel) in
-            (&entities, &positions, &masses, &mut accelerations).join()
-        {
+        for (myid, mypos, mut myaccel) in (&entities, &positions, &mut accelerations).join() {
             for (iid, ipos, imass) in (&entities, &positions, &masses).join() {
                 if myid == iid {
                     continue;
@@ -99,7 +97,7 @@ impl<'a> System<'a> for Gravity {
                 if distance < 3.0 {
                     distance = 3.0
                 }
-                let accel = G * mymass.0 * imass.0 / (distance * distance * distance);
+                let accel = G * imass.0 / (distance * distance * distance);
                 myaccel.x += dx * accel;
                 myaccel.y += dy * accel;
             }
